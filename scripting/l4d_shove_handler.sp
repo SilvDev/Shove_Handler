@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.0"
+#define PLUGIN_VERSION		"1.1"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.1 (17-May-2022)
+	- Fixed blood splatter appearing on shoves when damage is set to 0. Thanks to "Toranks" for reporting.
+	- Fixed SI getting stuck when shoved in the air and made to stumble. Thanks to "Toranks" for reporting.
 
 1.0 (16-May-2022)
 	- Initial release.
@@ -50,7 +54,7 @@
 #define GAMEDATA			"l4d_shove_handler"
 
 ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarStumble, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
-bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack;
+bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bHookTE;
 float g_fCvarDamage[9];
 int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9];
 int g_iMaxTypes, g_iShoves[2048][4]; // [0] = Entity reference. [1] = Shove count. [2] = Health. [3] = Type
@@ -135,6 +139,24 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 		return APLRes_SilentFailure;
 	}
 	return APLRes_Success;
+}
+
+public void OnAllPluginsLoaded()
+{
+	ConVar version = FindConVar("left4dhooks_version");
+	if( version != null )
+	{
+		char sVer[16];
+		version.GetString(sVer, sizeof(sVer));
+
+		float ver = StringToFloat(sVer);
+		if( ver >= 1.102 )
+		{
+			return;
+		}
+	}
+
+	SetFailState("This plugin requires Left4DHooks version 1.02 or newer. Please update.");
 }
 
 public void OnPluginStart()
@@ -419,9 +441,10 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	}
 
 	// Damage
+	float damage;
 	if( g_iCvarTypes & (1 << type - 1) )
 	{
-		float damage = g_fCvarDamage[type];
+		damage = g_fCvarDamage[type];
 
 		if( damage )
 		{
@@ -436,13 +459,22 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 		}
 	}
 
+	if( damage == 0.0 )
+	{
+		AddTempEntHook("EffectDispatch", OnTempEnt);
+		g_bHookTE = true;
+	}
+
 	// Stumble
 	if( g_iCvarStumble & (1 << type) )
 	{
-		float vPos[3];
-		GetClientAbsOrigin(client, vPos);
-		L4D_CancelStagger(victim);
-		L4D_StaggerPlayer(victim, client, vPos);
+		if( GetEntPropEnt(victim, Prop_Send, "m_hGroundEntity") != -1 )
+		{
+			float vPos[3];
+			GetClientAbsOrigin(client, vPos);
+			L4D_CancelStagger(victim);
+			L4D_StaggerPlayer(victim, client, vPos);
+		}
 	}
 
 	// Block game damage
@@ -452,9 +484,6 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	// Store health
 	g_iShoves[victim][INDEX_HEALTH] = GetEntProp(victim, Prop_Data, "m_iHealth");
 
-	// Reset move type, for some reason this breaks and makes Jockey/Hunter stuck in the air, maybe others if airborne
-	RequestFrame(OnFrameMove, GetClientUserId(victim));
-
 	return Plugin_Continue;
 }
 
@@ -462,6 +491,12 @@ public void L4D_OnShovedBySurvivor_Post(int client, int victim, const float vecD
 {
 	if( g_fShove[victim] == GetGameTime() )
 	{
+		if( g_bHookTE )
+		{
+			g_bHookTE = false;
+			RemoveTempEntHook("EffectDispatch", OnTempEnt);
+		}
+
 		int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
 		if( !g_bLeft4Dead2 && type == 5 ) type = 8;
 
@@ -495,22 +530,15 @@ public Action OnTakeDamageBlock(int victim, int &attacker, int &inflictor, float
 	return Plugin_Continue;
 }
 
-void OnFrameMove(int userid)
+Action OnTempEnt(const char[] te_name, const int[] Players, int numClients, float delay)
 {
-	int client = GetClientOfUserId(userid);
-	if( client && IsClientInGame(client) )
+	if( g_bHookTE )
 	{
-		RequestFrame(OnFrameMove2, userid);
+		g_bHookTE = false;
+		RemoveTempEntHook("EffectDispatch", OnTempEnt);
 	}
-}
 
-void OnFrameMove2(int client)
-{
-	client = GetClientOfUserId(client);
-	if( client && IsClientInGame(client) )
-	{
-		SetEntityMoveType(client, MOVETYPE_WALK);
-	}
+	return Plugin_Handled;
 }
 
 
