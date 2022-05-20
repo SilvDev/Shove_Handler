@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.1"
+#define PLUGIN_VERSION		"1.2"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,11 @@
 
 ========================================================================================
 	Change Log:
+
+1.2 (20-May-2022)
+	- Fixed the Tank and Witch cvars not being read in L4D1.
+	- Fixed SI sometimes being stuck floating. Thanks to "Toranks" for reporting.
+	- Fixed array out-of-bounds. Thanks to "Toranks" for reporting.
 
 1.1 (17-May-2022)
 	- Fixed blood splatter appearing on shoves when damage is set to 0. Thanks to "Toranks" for reporting.
@@ -52,13 +57,14 @@
 
 #define CVAR_FLAGS			FCVAR_NOTIFY
 #define GAMEDATA			"l4d_shove_handler"
+#define MAX_CVARS			9
 
 ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarStumble, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
 bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bHookTE;
-float g_fCvarDamage[9];
 int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9];
-int g_iMaxTypes, g_iShoves[2048][4]; // [0] = Entity reference. [1] = Shove count. [2] = Health. [3] = Type
-float g_fShove[2048];
+float g_fCvarDamage[9];
+float g_fShove[2048];		// Shove time
+int g_iShoves[2048][4];		// [0] = Entity reference. [1] = Shove count. [2] = Health. [3] = Type
 
 enum
 {
@@ -161,9 +167,6 @@ public void OnAllPluginsLoaded()
 
 public void OnPluginStart()
 {
-	if( g_bLeft4Dead2 )		g_iMaxTypes = 9;
-	else					g_iMaxTypes = 6;
-
 	// ====================================================================================================
 	// DETOURS
 	// ====================================================================================================
@@ -269,11 +272,14 @@ public void OnPluginStart()
 	g_hCvarStumble.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarTypes.AddChangeHook(ConVarChanged_Cvars);
 
-	for( int i = 0; i < g_iMaxTypes; i++ )
+	for( int i = 0; i < MAX_CVARS; i++ )
 	{
-		g_hCvarCount[i].AddChangeHook(ConVarChanged_Cvars);
-		g_hCvarDamage[i].AddChangeHook(ConVarChanged_Cvars);
-		g_hCvarType[i].AddChangeHook(ConVarChanged_Cvars);
+		if( g_bLeft4Dead2 || (i < 4 || i > 6) )
+		{
+			g_hCvarCount[i].AddChangeHook(ConVarChanged_Cvars);
+			g_hCvarDamage[i].AddChangeHook(ConVarChanged_Cvars);
+			g_hCvarType[i].AddChangeHook(ConVarChanged_Cvars);
+		}
 	}
 }
 
@@ -312,11 +318,14 @@ void GetCvars()
 	g_iCvarStumble = g_hCvarStumble.IntValue;
 	g_iCvarTypes = g_hCvarTypes.IntValue;
 
-	for( int i = 0; i < g_iMaxTypes; i++ )
+	for( int i = 0; i < MAX_CVARS; i++ )
 	{
-		g_iCvarCount[i] = g_hCvarCount[i].IntValue;
-		g_fCvarDamage[i] = g_hCvarDamage[i].FloatValue;
-		g_iCvarDamage[i] = g_hCvarType[i].IntValue;
+		if( g_bLeft4Dead2 || (i < 4 || i > 6) )
+		{
+			g_iCvarCount[i] = g_hCvarCount[i].IntValue;
+			g_fCvarDamage[i] = g_hCvarDamage[i].FloatValue;
+			g_iCvarDamage[i] = g_hCvarType[i].IntValue;
+		}
 	}
 }
 
@@ -417,6 +426,7 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
 	int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
+	if( type > INDEX_CHARGER ) return Plugin_Continue;
 	if( !g_bLeft4Dead2 && type == 5 ) type = 8;
 
 	// Shoves
@@ -459,10 +469,10 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 		}
 	}
 
-	if( damage == 0.0 )
+	if( damage == 0.0 && !g_bHookTE )
 	{
-		AddTempEntHook("EffectDispatch", OnTempEnt);
 		g_bHookTE = true;
+		AddTempEntHook("EffectDispatch", OnTempEnt);
 	}
 
 	// Stumble
@@ -474,6 +484,7 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 			GetClientAbsOrigin(client, vPos);
 			L4D_CancelStagger(victim);
 			L4D_StaggerPlayer(victim, client, vPos);
+			RequestFrame(OnFrameMove, GetClientUserId(victim));
 		}
 	}
 
@@ -489,7 +500,7 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 
 public void L4D_OnShovedBySurvivor_Post(int client, int victim, const float vecDir[3])
 {
-	if( g_fShove[victim] == GetGameTime() )
+	if( g_bCvarAllow && g_fShove[victim] == GetGameTime() )
 	{
 		if( g_bHookTE )
 		{
@@ -539,6 +550,25 @@ Action OnTempEnt(const char[] te_name, const int[] Players, int numClients, floa
 	}
 
 	return Plugin_Handled;
+}
+
+void OnFrameMove(int userid)
+{
+	int client = GetClientOfUserId(userid);
+	if( client && IsClientInGame(client) && GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1 )
+	{
+		RequestFrame(OnFrameMove2, userid);
+		SetEntityMoveType(client, MOVETYPE_WALK);
+	}
+}
+
+void OnFrameMove2(int userid)
+{
+	int client = GetClientOfUserId(userid);
+	if( client && IsClientInGame(client) && GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1 )
+	{
+		SetEntityMoveType(client, MOVETYPE_WALK);
+	}
 }
 
 
@@ -707,6 +737,7 @@ public void L4D2_OnEntityShoved_Post(int client, int entity, int weapon, float v
 	}
 }
 
+// When blocking stumble, trigger the post to reset health or kill
 public void L4D2_OnEntityShoved_PostHandled(int client, int entity, int weapon, float vecDir[3], bool bIsHighPounce)
 {
 	L4D2_OnEntityShoved_Post(client, entity, weapon, vecDir, bIsHighPounce);
