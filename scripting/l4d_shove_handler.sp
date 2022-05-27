@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.2"
+#define PLUGIN_VERSION		"1.3"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,9 @@
 
 ========================================================================================
 	Change Log:
+
+1.3 (27-May-2022)
+	- Fixed not stumbling Tanks or Witches. Thanks to "Maur0" for reporting.
 
 1.2 (20-May-2022)
 	- Fixed the Tank and Witch cvars not being read in L4D1.
@@ -426,8 +429,8 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
 	int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
-	if( type > INDEX_CHARGER ) return Plugin_Continue;
-	if( !g_bLeft4Dead2 && type == 5 ) type = 8;
+	if( type == (g_bLeft4Dead2 ? 8 : 5) ) type = 7;
+	if( type > (g_bLeft4Dead2 ? INDEX_TANK : INDEX_SPITTER) ) return Plugin_Continue;
 
 	// Shoves
 	if( g_iCvarCount[type] )
@@ -509,7 +512,7 @@ public void L4D_OnShovedBySurvivor_Post(int client, int victim, const float vecD
 		}
 
 		int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
-		if( !g_bLeft4Dead2 && type == 5 ) type = 8;
+		if( type == (g_bLeft4Dead2 ? 8 : 5) ) type = 7;
 
 		if( !(g_iCvarStumble & (1 << type)) )
 		{
@@ -607,7 +610,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 			// Damage common
 			float damage = g_fCvarDamage[INDEX_COMMON];
 
-			if( g_iCvarTypes & 1 << TYPE_COMMON )
+			if( g_iCvarTypes & 1 << INDEX_COMMON )
 			{
 				if( damage )
 				{
@@ -630,9 +633,9 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 			g_iShoves[entity][INDEX_HEALTH] = GetEntProp(entity, Prop_Data, "m_iHealth");
 
 			// Shove from behind - block first shove -OR- block stumble
-			if( (!g_bCvarBack && g_iShoves[entity][INDEX_COUNT] == 1) || !(g_iCvarStumble & (1 << TYPE_COMMON)) )
+			if( (!g_bCvarBack && g_iShoves[entity][INDEX_COUNT] == 1) || !(g_iCvarStumble & (1 << INDEX_COMMON)) )
 			{
-				if( g_iCvarStumble & (1 << TYPE_COMMON) )
+				if( g_iCvarStumble & (1 << INDEX_COMMON) )
 				{
 					// Stumble common
 					float vPos[3];
@@ -685,7 +688,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 			float damage;
 
 			// Damage Witch
-			if( g_iCvarTypes & 1 << TYPE_WITCH )
+			if( g_iCvarTypes & 1 << INDEX_WITCH )
 			{
 				damage = g_fCvarDamage[INDEX_WITCH];
 	
@@ -698,7 +701,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 						damage *= health / 100;
 					}
 
-					if( !(g_iCvarStumble & (1 << TYPE_WITCH)) )
+					if( !(g_iCvarStumble & (1 << INDEX_WITCH)) )
 					{
 						SDKHooks_TakeDamage(entity, client, client, damage, DMG_CLUB); // Prevents stumble
 					}
@@ -706,7 +709,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 			}
 
 			// Stumble Witch
-			if( g_iCvarStumble & (1 << TYPE_WITCH) )
+			if( g_iCvarStumble & (1 << INDEX_WITCH) )
 			{
 				float vPos[3];
 				GetClientAbsOrigin(client, vPos);
@@ -720,7 +723,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 	return Plugin_Continue;
 }
 
-public void L4D2_OnEntityShoved_Post(int client, int entity, int weapon, float vecDir[3], bool bIsHighPounce)
+public void L4D2_OnEntityShoved_Post(int client, int entity, int weapon, const float vecDir[3], bool bIsHighPounce)
 {
 	if( g_bCvarAllow && g_fShove[entity] == GetGameTime() )
 	{
@@ -738,7 +741,7 @@ public void L4D2_OnEntityShoved_Post(int client, int entity, int weapon, float v
 }
 
 // When blocking stumble, trigger the post to reset health or kill
-public void L4D2_OnEntityShoved_PostHandled(int client, int entity, int weapon, float vecDir[3], bool bIsHighPounce)
+public void L4D2_OnEntityShoved_PostHandled(int client, int entity, int weapon, const float vecDir[3], bool bIsHighPounce)
 {
 	L4D2_OnEntityShoved_Post(client, entity, weapon, vecDir, bIsHighPounce);
 }
