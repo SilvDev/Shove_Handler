@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.3"
+#define PLUGIN_VERSION		"1.4"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,13 @@
 
 ========================================================================================
 	Change Log:
+
+1.4 (03-Jun-2022)
+	- Fixed blocking Common Infected stumble not trigger the "entity_shoved" event correctly.
+	- This fix will cause the "entity_shoved" event to fire twice, once with the attacker value of "0" and after with the real attacker index.
+	- This fixes some plugin conflicts such as "Molotov Shove", "PipeBomb Shove" and "Vomitjar Shove" plugins.
+
+	- Changed the "modes" cvars method to use "Left4DHooks" forwards and natives instead of creating an entity.
 
 1.3 (27-May-2022)
 	- Fixed not stumbling Tanks or Witches. Thanks to "Maur0" for reporting.
@@ -185,19 +192,19 @@ public void OnPluginStart()
 
 	// Currently crashes when ignored
 	if( !hDetour )
-		SetFailState("Failed to find \"CCarProp::CTerrorWeapon::OnSwingEnd\" signature.");
+		SetFailState("Failed to find \"CTerrorWeapon::OnSwingEnd\" signature.");
 
 	if( !DHookEnableDetour(hDetour, false, OnSwingEnd) )
-		SetFailState("Failed to detour \"CCarProp::CTerrorWeapon::OnSwingEnd\".");
+		SetFailState("Failed to detour \"CTerrorWeapon::OnSwingEnd\".");
 
 	// Patch 2
 	hDetour = DHookCreateFromConf(hGameData, "Infected::OnAmbushed");
 
 	if( !hDetour )
-		SetFailState("Failed to find \"CCarProp::Infected::OnAmbushed\" signature.");
+		SetFailState("Failed to find \"Infected::OnAmbushed\" signature.");
 
 	if( !DHookEnableDetour(hDetour, false, OnAmbushed) )
-		SetFailState("Failed to detour \"CCarProp::Infected::OnAmbushed\".");
+		SetFailState("Failed to detour \"Infected::OnAmbushed\".");
 
 	delete hGameData;
 	delete hDetour;
@@ -305,12 +312,12 @@ public void OnConfigsExecuted()
 	IsAllowed();
 }
 
-public void ConVarChanged_Allow(Handle convar, const char[] oldValue, const char[] newValue)
+void ConVarChanged_Allow(Handle convar, const char[] oldValue, const char[] newValue)
 {
 	IsAllowed();
 }
 
-public void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newValue)
+void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newValue)
 {
 	GetCvars();
 }
@@ -350,36 +357,22 @@ void IsAllowed()
 }
 
 int g_iCurrentMode;
+public void L4D_OnGameModeChange(int gamemode)
+{
+	g_iCurrentMode = gamemode;
+}
+
 bool IsAllowedGameMode()
 {
 	if( g_hCvarMPGameMode == null )
 		return false;
 
+	if( g_iCurrentMode == 0 ) g_iCurrentMode = L4D_GetGameModeType();
+
 	int iCvarModesTog = g_hCvarModesTog.IntValue;
-	if( iCvarModesTog != 0 )
-	{
-		g_iCurrentMode = 0;
 
-		int entity = CreateEntityByName("info_gamemode");
-		if( IsValidEntity(entity) )
-		{
-			DispatchSpawn(entity);
-			HookSingleEntityOutput(entity, "OnCoop", OnGamemode, true);
-			HookSingleEntityOutput(entity, "OnSurvival", OnGamemode, true);
-			HookSingleEntityOutput(entity, "OnVersus", OnGamemode, true);
-			HookSingleEntityOutput(entity, "OnScavenge", OnGamemode, true);
-			ActivateEntity(entity);
-			AcceptEntityInput(entity, "PostSpawnActivate");
-			if( IsValidEntity(entity) ) // Because sometimes "PostSpawnActivate" seems to kill the ent.
-				RemoveEdict(entity); // Because multiple plugins creating at once, avoid too many duplicate ents in the same frame
-		}
-
-		if( g_iCurrentMode == 0 )
-			return false;
-
-		if( !(iCvarModesTog & g_iCurrentMode) )
-			return false;
-	}
+	if( iCvarModesTog && !(iCvarModesTog & g_iCurrentMode) )
+		return false;
 
 	char sGameModes[64], sGameMode[64];
 	g_hCvarMPGameMode.GetString(sGameMode, sizeof(sGameMode));
@@ -402,18 +395,6 @@ bool IsAllowedGameMode()
 	}
 
 	return true;
-}
-
-public void OnGamemode(const char[] output, int caller, int activator, float delay)
-{
-	if( strcmp(output, "OnCoop") == 0 )
-		g_iCurrentMode = 1;
-	else if( strcmp(output, "OnSurvival") == 0 )
-		g_iCurrentMode = 2;
-	else if( strcmp(output, "OnVersus") == 0 )
-		g_iCurrentMode = 4;
-	else if( strcmp(output, "OnScavenge") == 0 )
-		g_iCurrentMode = 8;
 }
 
 
@@ -523,7 +504,7 @@ public void L4D_OnShovedBySurvivor_Post(int client, int victim, const float vecD
 	}
 }
 
-public Action OnTakeDamageBlock(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
+Action OnTakeDamageBlock(int victim, int &attacker, int &inflictor, float &damage, int &damagetype)
 {
 	SDKUnhook(victim, SDKHook_OnTakeDamage, OnTakeDamageBlock);
 
@@ -661,6 +642,14 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 
 				g_fShove[entity] = GetGameTime();
 
+				Event hEvent = CreateEvent("entity_shoved");
+				if( hEvent )
+				{
+					hEvent.SetInt("entityid", entity);
+					hEvent.SetInt("attacker", GetClientUserId(client));
+					hEvent.Fire();
+				}
+
 				// Block default stumble which can result in death if from behind
 				return Plugin_Handled;
 			}
@@ -777,7 +766,7 @@ void PushCommon(int client, int target, const float vPos[3], float damage, int t
 //					DETOURS - MELEE AWARDS BLOCK
 // ====================================================================================================
 // Prevent "melee_kill" event and awards triggering when not killing common
-public MRESReturn OnSwingEnd(int pThis, Handle hReturn)
+MRESReturn OnSwingEnd(int pThis, Handle hReturn)
 {
 	if( g_bCvarAllow && g_iShoves[pThis][INDEX_COUNT] > 1 && GetGameTime() == g_fShove[pThis] )
 	{
@@ -788,7 +777,7 @@ public MRESReturn OnSwingEnd(int pThis, Handle hReturn)
 	return MRES_Ignored;
 }
 
-public MRESReturn OnAmbushed(int pThis, Handle hParams)
+MRESReturn OnAmbushed(int pThis, Handle hParams)
 {
 	if( g_bCvarAllow && g_iShoves[pThis][INDEX_COUNT] > 1 && GetGameTime() == g_fShove[pThis] )
 	{
