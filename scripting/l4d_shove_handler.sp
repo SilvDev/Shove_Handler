@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.4"
+#define PLUGIN_VERSION		"1.5"
 
 /*=======================================================================================
 	Plugin Info:
@@ -32,8 +32,11 @@
 ========================================================================================
 	Change Log:
 
+1.5 (20-Jun-2022)
+	- Fixed array index out-of-bounds error. Thanks to "Voevoda" for reporting.
+
 1.4 (03-Jun-2022)
-	- Fixed blocking Common Infected stumble not trigger the "entity_shoved" event correctly.
+	- Fixed blocking Common Infected stumble not triggering the "entity_shoved" event correctly.
 	- This fix will cause the "entity_shoved" event to fire twice, once with the attacker value of "0" and after with the real attacker index.
 	- This fixes some plugin conflicts such as "Molotov Shove", "PipeBomb Shove" and "Vomitjar Shove" plugins.
 
@@ -162,7 +165,7 @@ public void OnAllPluginsLoaded()
 	ConVar version = FindConVar("left4dhooks_version");
 	if( version != null )
 	{
-		char sVer[16];
+		char sVer[8];
 		version.GetString(sVer, sizeof(sVer));
 
 		float ver = StringToFloat(sVer);
@@ -172,7 +175,7 @@ public void OnAllPluginsLoaded()
 		}
 	}
 
-	SetFailState("This plugin requires Left4DHooks version 1.02 or newer. Please update.");
+	SetFailState("\n==========\nThis plugin requires \"Left 4 DHooks Direct\" version 1.02 or newer. Please update:\nhttps://forums.alliedmods.net/showthread.php?t=321696\n==========");
 }
 
 public void OnPluginStart()
@@ -190,7 +193,6 @@ public void OnPluginStart()
 	// Patch 1
 	Handle hDetour = DHookCreateFromConf(hGameData, "CTerrorWeapon::OnSwingEnd");
 
-	// Currently crashes when ignored
 	if( !hDetour )
 		SetFailState("Failed to find \"CTerrorWeapon::OnSwingEnd\" signature.");
 
@@ -714,7 +716,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 
 public void L4D2_OnEntityShoved_Post(int client, int entity, int weapon, const float vecDir[3], bool bIsHighPounce)
 {
-	if( g_bCvarAllow && g_fShove[entity] == GetGameTime() )
+	if( g_bCvarAllow && entity != -1 && g_fShove[entity] == GetGameTime() )
 	{
 		// Restore health that would kill common, or kill if shove count reached
 		if( g_iShoves[entity][INDEX_TYPE] == TYPE_COMMON )
