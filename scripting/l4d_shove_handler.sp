@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.5"
+#define PLUGIN_VERSION		"1.6"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.6 (14-Jul-2022)
+	- Added cvar "l4d_shove_handler_hunter" to allow or disallow punching an airborne hunter. Requested by "ZBzibing".
+	- Code changes that require SourceMod version 1.11.
 
 1.5 (20-Jun-2022)
 	- Fixed array index out-of-bounds error. Thanks to "Voevoda" for reporting.
@@ -72,8 +76,8 @@
 #define GAMEDATA			"l4d_shove_handler"
 #define MAX_CVARS			9
 
-ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarStumble, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
-bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bHookTE;
+ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarSkeet, g_hCvarStumble, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
+bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bCvarSkeet, g_bHookTE;
 int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9];
 float g_fCvarDamage[9];
 float g_fShove[2048];		// Shove time
@@ -187,25 +191,25 @@ public void OnPluginStart()
 	BuildPath(Path_SM, sPath, sizeof(sPath), "gamedata/%s.txt", GAMEDATA);
 	if( FileExists(sPath) == false ) SetFailState("\n==========\nMissing required file: \"%s\".\nRead installation instructions again.\n==========", sPath);
 
-	Handle hGameData = LoadGameConfigFile(GAMEDATA);
+	GameData hGameData = new GameData(GAMEDATA);
 	if( hGameData == null ) SetFailState("Failed to load \"%s.txt\" gamedata.", GAMEDATA);
 
 	// Patch 1
-	Handle hDetour = DHookCreateFromConf(hGameData, "CTerrorWeapon::OnSwingEnd");
+	DynamicDetour hDetour = DynamicDetour.FromConf(hGameData, "CTerrorWeapon::OnSwingEnd");
 
 	if( !hDetour )
 		SetFailState("Failed to find \"CTerrorWeapon::OnSwingEnd\" signature.");
 
-	if( !DHookEnableDetour(hDetour, false, OnSwingEnd) )
+	if( !hDetour.Enable(Hook_Pre, OnSwingEnd) )
 		SetFailState("Failed to detour \"CTerrorWeapon::OnSwingEnd\".");
 
 	// Patch 2
-	hDetour = DHookCreateFromConf(hGameData, "Infected::OnAmbushed");
+	hDetour = DynamicDetour.FromConf(hGameData, "Infected::OnAmbushed");
 
 	if( !hDetour )
 		SetFailState("Failed to find \"Infected::OnAmbushed\" signature.");
 
-	if( !DHookEnableDetour(hDetour, false, OnAmbushed) )
+	if( !hDetour.Enable(Hook_Pre, OnAmbushed) )
 		SetFailState("Failed to detour \"Infected::OnAmbushed\".");
 
 	delete hGameData;
@@ -253,6 +257,8 @@ public void OnPluginStart()
 	g_hCvarDamage[7] = CreateConVar(	"l4d_shove_handler_damage_tank",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
 	g_hCvarDamage[8] = CreateConVar(	"l4d_shove_handler_damage_witch",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
 
+	// Hunter skeet
+	g_hCvarSkeet = CreateConVar(		"l4d_shove_handler_hunter",				"1",			"0=Off. 1=On. Should survivors be allowed to skeet shove a hunter that was flying in the air.", CVAR_FLAGS );
 	// Stumble
 	g_hCvarStumble = CreateConVar(		"l4d_shove_handler_stumble",			"127",			"Stumble when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank (default off), 256=Witch (default off). 511=All. Add numbers together.", CVAR_FLAGS );
 
@@ -281,6 +287,7 @@ public void OnPluginStart()
 	g_hCvarAllow.AddChangeHook(ConVarChanged_Allow);
 	g_hCvarBack.AddChangeHook(ConVarChanged_Cvars);
 	
+	g_hCvarSkeet.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarStumble.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarTypes.AddChangeHook(ConVarChanged_Cvars);
 
@@ -327,6 +334,7 @@ void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newV
 void GetCvars()
 {
 	g_bCvarBack = g_hCvarBack.BoolValue;
+	g_bCvarSkeet = g_hCvarSkeet.BoolValue;
 	g_iCvarStumble = g_hCvarStumble.IntValue;
 	g_iCvarTypes = g_hCvarTypes.IntValue;
 
@@ -414,6 +422,12 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
 	if( type == (g_bLeft4Dead2 ? 8 : 5) ) type = 7;
 	if( type > (g_bLeft4Dead2 ? INDEX_TANK : INDEX_SPITTER) ) return Plugin_Continue;
+
+	// SKeet shoving hunter
+	if( type == INDEX_HUNTER && !g_bCvarSkeet && GetEntPropEnt(victim, Prop_Send, "m_hGroundEntity") == -1 && GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce") )
+	{
+		return Plugin_Handled;
+	}
 
 	// Shoves
 	if( g_iCvarCount[type] )
@@ -768,18 +782,18 @@ void PushCommon(int client, int target, const float vPos[3], float damage, int t
 //					DETOURS - MELEE AWARDS BLOCK
 // ====================================================================================================
 // Prevent "melee_kill" event and awards triggering when not killing common
-MRESReturn OnSwingEnd(int pThis, Handle hReturn)
+MRESReturn OnSwingEnd(int pThis, DHookReturn hReturn)
 {
 	if( g_bCvarAllow && g_iShoves[pThis][INDEX_COUNT] > 1 && GetGameTime() == g_fShove[pThis] )
 	{
-		DHookSetReturn(hReturn, 0);
+		hReturn.Value = 0;
 		return MRES_Supercede;
 	}
 
 	return MRES_Ignored;
 }
 
-MRESReturn OnAmbushed(int pThis, Handle hParams)
+MRESReturn OnAmbushed(int pThis, DHookParam hParams)
 {
 	if( g_bCvarAllow && g_iShoves[pThis][INDEX_COUNT] > 1 && GetGameTime() == g_fShove[pThis] )
 	{
