@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.6"
+#define PLUGIN_VERSION		"1.7"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.7 (04-Aug-2022)
+	- Fixed cvar "l4d_shove_handler_hunter" not always working. Thanks to "ZBzibing" for reporting.
+	- Fixed the plugin damage other entities such a GasCans.. Thanks to "moschinovac" for reporting.
 
 1.6 (14-Jul-2022)
 	- Added cvar "l4d_shove_handler_hunter" to allow or disallow punching an airborne hunter. Requested by "ZBzibing".
@@ -203,6 +207,8 @@ public void OnPluginStart()
 	if( !hDetour.Enable(Hook_Pre, OnSwingEnd) )
 		SetFailState("Failed to detour \"CTerrorWeapon::OnSwingEnd\".");
 
+	delete hDetour;
+
 	// Patch 2
 	hDetour = DynamicDetour.FromConf(hGameData, "Infected::OnAmbushed");
 
@@ -259,6 +265,7 @@ public void OnPluginStart()
 
 	// Hunter skeet
 	g_hCvarSkeet = CreateConVar(		"l4d_shove_handler_hunter",				"1",			"0=Off. 1=On. Should survivors be allowed to skeet shove a hunter that was flying in the air.", CVAR_FLAGS );
+
 	// Stumble
 	g_hCvarStumble = CreateConVar(		"l4d_shove_handler_stumble",			"127",			"Stumble when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank (default off), 256=Witch (default off). 511=All. Add numbers together.", CVAR_FLAGS );
 
@@ -582,7 +589,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 
 	if( entity > 0 && entity <= MaxClients && client > 0 && client <= MaxClients && GetClientTeam(client) == 2 )
 	{
-		L4D_OnShovedBySurvivor(client, entity, vecDir);
+		return L4D_OnShovedBySurvivor(client, entity, vecDir);
 	}
 	else if( entity > MaxClients && client > 0 && client <= MaxClients && GetClientTeam(client) == 2 )
 	{
@@ -721,8 +728,16 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 				PushCommon(client, entity, vPos, damage, TYPE_WITCH);
 			}
 		}
+		else
+		{
+			g_iShoves[entity][INDEX_TYPE] = -1;
+		}
 
 		g_fShove[entity] = GetGameTime();
+	}
+	else if( entity > MaxClients && entity < 2048 )
+	{
+		g_iShoves[entity][INDEX_TYPE] = -1;
 	}
 
 	return Plugin_Continue;
