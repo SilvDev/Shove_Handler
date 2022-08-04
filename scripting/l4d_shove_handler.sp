@@ -34,7 +34,7 @@
 
 1.7 (04-Aug-2022)
 	- Fixed cvar "l4d_shove_handler_hunter" not always working. Thanks to "ZBzibing" for reporting.
-	- Fixed the plugin damage other entities such a GasCans.. Thanks to "moschinovac" for reporting.
+	- Fixed the plugin damage other entities such a GasCans. Thanks to "moschinovac" for reporting.
 
 1.6 (14-Jul-2022)
 	- Added cvar "l4d_shove_handler_hunter" to allow or disallow punching an airborne hunter. Requested by "ZBzibing".
