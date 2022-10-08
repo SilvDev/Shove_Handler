@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.7"
+#define PLUGIN_VERSION		"1.8"
 
 /*=======================================================================================
 	Plugin Info:
@@ -32,9 +32,12 @@
 ========================================================================================
 	Change Log:
 
+1.8 (08-Oct-2022)
+	- Added cvar "l4d_shove_handler_survivor" to allow or disallow survivors shoving each other. Requested by "MilanesaTM".
+
 1.7 (04-Aug-2022)
 	- Fixed cvar "l4d_shove_handler_hunter" not always working. Thanks to "ZBzibing" for reporting.
-	- Fixed the plugin damage other entities such a GasCans. Thanks to "moschinovac" for reporting.
+	- Fixed the plugin damaging other entities such a GasCans. Thanks to "moschinovac" for reporting.
 
 1.6 (14-Jul-2022)
 	- Added cvar "l4d_shove_handler_hunter" to allow or disallow punching an airborne hunter. Requested by "ZBzibing".
@@ -80,8 +83,8 @@
 #define GAMEDATA			"l4d_shove_handler"
 #define MAX_CVARS			9
 
-ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarSkeet, g_hCvarStumble, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
-bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bCvarSkeet, g_bHookTE;
+ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarSkeet, g_hCvarStumble, g_hCvarSurvivor, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
+bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bCvarSkeet, g_bCvarSurvivor, g_bHookTE;
 int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9];
 float g_fCvarDamage[9];
 float g_fShove[2048];		// Shove time
@@ -268,6 +271,7 @@ public void OnPluginStart()
 
 	// Stumble
 	g_hCvarStumble = CreateConVar(		"l4d_shove_handler_stumble",			"127",			"Stumble when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank (default off), 256=Witch (default off). 511=All. Add numbers together.", CVAR_FLAGS );
+	g_hCvarSurvivor = CreateConVar(		"l4d_shove_handler_survivor",			"1",			"0=Block Survivors shoving other Survivors. 1=Allow Survivors to shove each other (game default).", CVAR_FLAGS );
 
 	// Damage Type
 	g_hCvarType[0] = CreateConVar(		"l4d_shove_handler_type_common",		"1",			"1=Deal the damage value specified. 2=Deal the specified damage value as a percentage of their maximum health.", CVAR_FLAGS );
@@ -296,6 +300,7 @@ public void OnPluginStart()
 	
 	g_hCvarSkeet.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarStumble.AddChangeHook(ConVarChanged_Cvars);
+	g_hCvarSurvivor.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarTypes.AddChangeHook(ConVarChanged_Cvars);
 
 	for( int i = 0; i < MAX_CVARS; i++ )
@@ -343,6 +348,7 @@ void GetCvars()
 	g_bCvarBack = g_hCvarBack.BoolValue;
 	g_bCvarSkeet = g_hCvarSkeet.BoolValue;
 	g_iCvarStumble = g_hCvarStumble.IntValue;
+	g_bCvarSurvivor = g_hCvarSurvivor.BoolValue;
 	g_iCvarTypes = g_hCvarTypes.IntValue;
 
 	for( int i = 0; i < MAX_CVARS; i++ )
@@ -421,8 +427,9 @@ bool IsAllowedGameMode()
 // ====================================================================================================
 public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[3])
 {
-	if( !g_bCvarAllow ) return Plugin_Continue;
+	if( !g_bCvarAllow ) return Plugin_Continue; // Plugin off
 	if( g_fShove[victim] == GetGameTime() ) return Plugin_Continue; // Sometimes it's called twice in 1 frame -_-
+	if( !g_bCvarSurvivor && GetClientTeam(client) == 2 && GetClientTeam(victim) == 2 ) return Plugin_Handled; // Block survivors shoving each other
 
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
