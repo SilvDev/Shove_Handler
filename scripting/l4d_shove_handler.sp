@@ -1,6 +1,6 @@
 /*
 *	Shove Handler
-*	Copyright (C) 2022 Silvers
+*	Copyright (C) 2023 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.8"
+#define PLUGIN_VERSION		"1.9"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,9 @@
 
 ========================================================================================
 	Change Log:
+
+1.9 (10-Mar-2023)
+	- Fixed invalid edict errors. Thanks to "Voevoda" for reporting.
 
 1.8 (08-Oct-2022)
 	- Added cvar "l4d_shove_handler_survivor" to allow or disallow survivors shoving each other. Requested by "MilanesaTM".
@@ -598,7 +601,7 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 	{
 		return L4D_OnShovedBySurvivor(client, entity, vecDir);
 	}
-	else if( entity > MaxClients && client > 0 && client <= MaxClients && GetClientTeam(client) == 2 )
+	else if( entity > MaxClients && IsValidEdict(entity) && client > 0 && client <= MaxClients && GetClientTeam(client) == 2 )
 	{
 		// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
