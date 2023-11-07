@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.10"
+#define PLUGIN_VERSION		"1.11"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.11 (07-Nov-2023)
+	- L4D1: Fixed not affecting the Tank. Thanks to "ZBzibing" for reporting.
+	- Fixed the count cvar not affecting the Witch correctly if the Common count cvar was not enabled.
 
 1.10 (31-Mar-2023)
 	- Changed the "l4d_shove_handler_hunter" cvar description to better describe what it does.
@@ -92,7 +96,7 @@
 
 ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarDeadstop, g_hCvarStumble, g_hCvarSurvivor, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
 bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bCvarDeadstop, g_bCvarSurvivor, g_bHookTE;
-int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9];
+int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9], g_iClassTank, g_iClassMax;
 float g_fCvarDamage[9];
 float g_fShove[2048];		// Shove time
 int g_iShoves[2048][4];		// [0] = Entity reference. [1] = Shove count. [2] = Health. [3] = Type
@@ -319,6 +323,9 @@ public void OnPluginStart()
 			g_hCvarType[i].AddChangeHook(ConVarChanged_Cvars);
 		}
 	}
+
+	g_iClassTank = g_bLeft4Dead2 ? 8 : 5;
+	g_iClassMax = g_bLeft4Dead2 ? INDEX_TANK : INDEX_JOCKEY;
 }
 
 public void OnMapStart()
@@ -441,8 +448,8 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
 	int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
-	if( type == (g_bLeft4Dead2 ? 8 : 5) ) type = 7;
-	if( type > (g_bLeft4Dead2 ? INDEX_TANK : INDEX_SPITTER) ) return Plugin_Continue;
+	if( type > g_iClassMax ) return Plugin_Continue;
+	if( type == g_iClassTank ) type = 7;
 
 	// Deadstop shoving hunter
 	if( type == INDEX_HUNTER && !g_bCvarDeadstop && GetEntPropEnt(victim, Prop_Send, "m_hGroundEntity") == -1 && GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce") )
@@ -701,11 +708,10 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 				g_iShoves[entity][INDEX_COUNT] = 0;
 				g_iShoves[entity][INDEX_TYPE] = TYPE_WITCH;
 			}
-
 			g_iShoves[entity][INDEX_COUNT]++;
 
 			// Kill on shoves
-			if( g_iCvarCount[INDEX_COMMON] && g_iShoves[entity][INDEX_COUNT] >= g_iCvarCount[INDEX_WITCH] )
+			if( g_iCvarCount[INDEX_WITCH] && g_iShoves[entity][INDEX_COUNT] >= g_iCvarCount[INDEX_WITCH] )
 			{
 				SDKHooks_TakeDamage(entity, client, client, GetEntProp(entity, Prop_Data, "m_iHealth") + 1.0, DMG_CLUB);
 				return Plugin_Continue;
