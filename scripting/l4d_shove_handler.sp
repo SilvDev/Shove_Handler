@@ -1,6 +1,6 @@
 /*
 *	Shove Handler
-*	Copyright (C) 2023 Silvers
+*	Copyright (C) 2024 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.11"
+#define PLUGIN_VERSION		"1.12"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,11 @@
 
 ========================================================================================
 	Change Log:
+
+1.12 (25-Mar-2024)
+	- Added cvars "l4d_shove_handler_damage_surv" and "l4d_shove_handler_type_surv" to control Survivor damage on shove.
+	- Fixed not being able to free Survivors from Smokers and Jockeys if "l4d_shove_handler_survivor" was set to "0". Thanks to "glhf3000" for reporting.
+	- Various changes to fix incorrect damage or cvar settings being followed.
 
 1.11 (07-Nov-2023)
 	- L4D1: Fixed not affecting the Tank. Thanks to "ZBzibing" for reporting.
@@ -92,12 +97,12 @@
 
 #define CVAR_FLAGS			FCVAR_NOTIFY
 #define GAMEDATA			"l4d_shove_handler"
-#define MAX_CVARS			9
+#define MAX_CVARS			10
 
-ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarDeadstop, g_hCvarStumble, g_hCvarSurvivor, g_hCvarTypes, g_hCvarCount[9], g_hCvarDamage[9], g_hCvarType[9];
+ConVar g_hCvarAllow, g_hCvarMPGameMode, g_hCvarModes, g_hCvarModesOff, g_hCvarModesTog, g_hCvarBack, g_hCvarDeadstop, g_hCvarStumble, g_hCvarSurvivor, g_hCvarTypes, g_hCvarCount[MAX_CVARS], g_hCvarDamage[MAX_CVARS], g_hCvarType[MAX_CVARS];
 bool g_bCvarAllow, g_bLeft4Dead2, g_bCvarBack, g_bCvarDeadstop, g_bCvarSurvivor, g_bHookTE;
-int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[9], g_iCvarDamage[9], g_iClassTank, g_iClassMax;
-float g_fCvarDamage[9];
+int g_iCvarStumble, g_iCvarTypes, g_iCvarCount[MAX_CVARS], g_iCvarDamage[MAX_CVARS], g_iClassTank, g_iClassMax;
+float g_fCvarDamage[MAX_CVARS];
 float g_fShove[2048];		// Shove time
 int g_iShoves[2048][4];		// [0] = Entity reference. [1] = Shove count. [2] = Health. [3] = Type
 
@@ -112,6 +117,7 @@ enum
 	TYPE_CHARGER	= 32,
 	TYPE_TANK		= 64,
 	TYPE_WITCH		= 128,
+	TYPE_SURV		= 256
 }
 
 enum
@@ -125,6 +131,7 @@ enum
 	INDEX_CHARGER	= 6,
 	INDEX_TANK		= 7,
 	INDEX_WITCH		= 8,
+	INDEX_SURV		= 9
 }
 
 enum
@@ -261,7 +268,7 @@ public void OnPluginStart()
 	g_hCvarCount[8] = CreateConVar(		"l4d_shove_handler_count_witch",		"0",			"0=Ignore shove count (unlimited shoves). How many shoves does it take to kill.", CVAR_FLAGS );
 
 	// Types
-	g_hCvarTypes = CreateConVar(		"l4d_shove_handler_damaged",			"511",			"Who can be damaged when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank, 256=Witch. 511=All. Add numbers together.", CVAR_FLAGS );
+	g_hCvarTypes = CreateConVar(		"l4d_shove_handler_damaged",			"511",			"Who can be damaged when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank, 256=Witch, 512=Survivor. 1023=All. Add numbers together.", CVAR_FLAGS );
 
 	// Damage
 	g_hCvarDamage[0] = CreateConVar(	"l4d_shove_handler_damage_common",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
@@ -276,12 +283,13 @@ public void OnPluginStart()
 	}
 	g_hCvarDamage[7] = CreateConVar(	"l4d_shove_handler_damage_tank",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
 	g_hCvarDamage[8] = CreateConVar(	"l4d_shove_handler_damage_witch",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
+	g_hCvarDamage[9] = CreateConVar(	"l4d_shove_handler_damage_surv",		"10.0",			"0.0=None (game default). Amount of damage each shove causes. If using percentage type, 100.0 = full health.", CVAR_FLAGS );
 
 	// Hunter deadstop
 	g_hCvarDeadstop = CreateConVar(		"l4d_shove_handler_hunter",				"1",			"0=No deadstop. 1=Allow Survivors to shove a hunter that was flying in the air to deadstop it (game default).", CVAR_FLAGS );
 
 	// Stumble
-	g_hCvarStumble = CreateConVar(		"l4d_shove_handler_stumble",			"127",			"Stumble when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank (default off), 256=Witch (default off). 511=All. Add numbers together.", CVAR_FLAGS );
+	g_hCvarStumble = CreateConVar(		"l4d_shove_handler_stumble",			"127",			"Stumble when shoved: 0=None, 1=Common, 2=Smoker, 4=Boomer, 8=Hunter, 16=Spitter, 32=Jockey, 64=Charger, 128=Tank (default off), 256=Witch (default off), 512=Survivor (default off). 1023=All. Add numbers together.", CVAR_FLAGS );
 	g_hCvarSurvivor = CreateConVar(		"l4d_shove_handler_survivor",			"1",			"0=Block Survivors shoving other Survivors. 1=Allow Survivors to shove each other (game default).", CVAR_FLAGS );
 
 	// Damage Type
@@ -297,6 +305,7 @@ public void OnPluginStart()
 	}
 	g_hCvarType[7] = CreateConVar(		"l4d_shove_handler_type_tank",			"1",			"1=Deal the damage value specified. 2=Deal the specified damage value as a percentage of their maximum health.", CVAR_FLAGS );
 	g_hCvarType[8] = CreateConVar(		"l4d_shove_handler_type_witch",			"1",			"1=Deal the damage value specified. 2=Deal the specified damage value as a percentage of their maximum health.", CVAR_FLAGS );
+	g_hCvarType[9] = CreateConVar(		"l4d_shove_handler_type_surv",			"1",			"1=Deal the damage value specified. 2=Deal the specified damage value as a percentage of their maximum health.", CVAR_FLAGS );
 
 	CreateConVar(						"l4d_shove_handler_version",			PLUGIN_VERSION,	"Shove Handler plugin version.", FCVAR_NOTIFY|FCVAR_DONTRECORD);
 	AutoExecConfig(true,				"l4d_shove_handler");
@@ -316,16 +325,16 @@ public void OnPluginStart()
 
 	for( int i = 0; i < MAX_CVARS; i++ )
 	{
-		if( g_bLeft4Dead2 || (i < 4 || i > 6) )
+		if( g_bLeft4Dead2 || (i < 4 || i > 6) || i == 9 )
 		{
-			g_hCvarCount[i].AddChangeHook(ConVarChanged_Cvars);
+			if( i != 9 ) g_hCvarCount[i].AddChangeHook(ConVarChanged_Cvars);
 			g_hCvarDamage[i].AddChangeHook(ConVarChanged_Cvars);
 			g_hCvarType[i].AddChangeHook(ConVarChanged_Cvars);
 		}
 	}
 
 	g_iClassTank = g_bLeft4Dead2 ? 8 : 5;
-	g_iClassMax = g_bLeft4Dead2 ? INDEX_TANK : INDEX_JOCKEY;
+	g_iClassMax = g_bLeft4Dead2 ? INDEX_WITCH : INDEX_JOCKEY;
 }
 
 public void OnMapStart()
@@ -367,9 +376,9 @@ void GetCvars()
 
 	for( int i = 0; i < MAX_CVARS; i++ )
 	{
-		if( g_bLeft4Dead2 || (i < 4 || i > 6) )
+		if( g_bLeft4Dead2 || (i < 4 || i > 6) || i == 9 )
 		{
-			g_iCvarCount[i] = g_hCvarCount[i].IntValue;
+			if( i != 9 ) g_iCvarCount[i] = g_hCvarCount[i].IntValue;
 			g_fCvarDamage[i] = g_hCvarDamage[i].FloatValue;
 			g_iCvarDamage[i] = g_hCvarType[i].IntValue;
 		}
@@ -443,13 +452,32 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 {
 	if( !g_bCvarAllow ) return Plugin_Continue; // Plugin off
 	if( g_fShove[victim] == GetGameTime() ) return Plugin_Continue; // Sometimes it's called twice in 1 frame -_-
-	if( !g_bCvarSurvivor && GetClientTeam(client) == 2 && GetClientTeam(victim) == 2 ) return Plugin_Handled; // Block survivors shoving each other
+
+	// Block survivors shoving each other
+	if( !g_bCvarSurvivor && GetClientTeam(client) == 2 && GetClientTeam(victim) == 2 )
+	{
+		if( GetEntProp(client, Prop_Send, "m_isHangingFromTongue") != 1 && GetEntPropEnt(victim, Prop_Send, "m_tongueOwner") == -1 && GetEntPropEnt(victim, Prop_Send, "m_jockeyAttacker") == -1 )
+		{
+			return Plugin_Handled;
+		}
+	}
+
 
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
-	int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
-	if( type > g_iClassMax ) return Plugin_Continue;
-	if( type == g_iClassTank ) type = 7;
+	int type;
+	if( GetClientTeam(victim) == 2 )
+	{
+		type = INDEX_SURV;
+	}
+	else
+	{
+		type = GetEntProp(victim, Prop_Send, "m_zombieClass");
+		if( type > g_iClassMax ) return Plugin_Continue;
+		if( type == g_iClassTank ) type = 7;
+	}
+
+
 
 	// Deadstop shoving hunter
 	if( type == INDEX_HUNTER && !g_bCvarDeadstop && GetEntPropEnt(victim, Prop_Send, "m_hGroundEntity") == -1 && GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce") )
@@ -480,7 +508,9 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 
 	// Damage
 	float damage;
-	if( g_iCvarTypes & (1 << type - 1) )
+	if( type != INDEX_SURV ) type -= 1;
+
+	if( g_iCvarTypes & (1 << type) )
 	{
 		damage = g_fCvarDamage[type];
 
@@ -633,10 +663,12 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 			g_iShoves[entity][INDEX_COUNT]++;
 
 			// Damage common
-			float damage = g_fCvarDamage[INDEX_COMMON];
+			float damage;
 
 			if( g_iCvarTypes & 1 << INDEX_COMMON )
 			{
+				damage = g_fCvarDamage[INDEX_COMMON];
+
 				if( damage )
 				{
 					// Damage scale
