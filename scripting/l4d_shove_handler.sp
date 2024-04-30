@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.12"
+#define PLUGIN_VERSION		"1.13"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.13 (30-Apr-2024)
+	- Fixed damage cvars not setting on the correct player classes.
+	- To block stumble on Special Infected this plugin requires Left4DHooks version 1.147 or newer.
 
 1.12 (25-Mar-2024)
 	- Added cvars "l4d_shove_handler_damage_surv" and "l4d_shove_handler_type_surv" to control Survivor damage on shove.
@@ -198,6 +202,12 @@ public void OnAllPluginsLoaded()
 		version.GetString(sVer, sizeof(sVer));
 
 		float ver = StringToFloat(sVer);
+
+		if( !g_bLeft4Dead2 && ver < 1.147 )
+		{
+			LogError("Update Left4DHooks to fix stopping Special Infected from staggering.");
+		}
+
 		if( ver >= 1.102 )
 		{
 			return;
@@ -508,7 +518,6 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 
 	// Damage
 	float damage;
-	if( type != INDEX_SURV ) type -= 1;
 
 	if( g_iCvarTypes & (1 << type) )
 	{
@@ -517,7 +526,7 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 		if( damage )
 		{
 			// Damage scale
-			if( g_iCvarDamage[type] == 2 )
+			if( g_iCvarDamage[type - 1] == 2 )
 			{
 				int health = GetEntProp(victim, Prop_Data, "m_iMaxHealth");
 				damage *= health / 100;
@@ -553,6 +562,11 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	// Store health
 	g_iShoves[victim][INDEX_HEALTH] = GetEntProp(victim, Prop_Data, "m_iHealth");
 
+	if( !(g_iCvarStumble & (1 << type)) )
+	{
+		L4D_CancelStagger(victim);
+	}
+
 	return Plugin_Continue;
 }
 
@@ -564,14 +578,6 @@ public void L4D_OnShovedBySurvivor_Post(int client, int victim, const float vecD
 		{
 			g_bHookTE = false;
 			RemoveTempEntHook("EffectDispatch", OnTempEnt);
-		}
-
-		int type = GetEntProp(victim, Prop_Send, "m_zombieClass");
-		if( type == (g_bLeft4Dead2 ? 8 : 5) ) type = 7;
-
-		if( !(g_iCvarStumble & (1 << type)) )
-		{
-			L4D_CancelStagger(victim);
 		}
 
 		SetEntProp(victim, Prop_Data, "m_iHealth", g_iShoves[victim][INDEX_HEALTH]);
