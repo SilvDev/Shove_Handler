@@ -1,6 +1,6 @@
 /*
 *	Shove Handler
-*	Copyright (C) 2024 Silvers
+*	Copyright (C) 2026 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION		"1.13"
+#define PLUGIN_VERSION		"1.14"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,11 @@
 
 ========================================================================================
 	Change Log:
+
+1.14 (04-Jan-2026)
+	- Fixed the "*_type" cvars being applied to the wrong classes.
+	- Fixed the "*_type" cvars option "2" not scaling damage as a percentage.
+	- Thanks to "Nehvar" for reporting.
 
 1.13 (30-Apr-2024)
 	- Fixed damage cvars not setting on the correct player classes.
@@ -208,13 +213,11 @@ public void OnAllPluginsLoaded()
 			LogError("Update Left4DHooks to fix stopping Special Infected from staggering.");
 		}
 
-		if( ver >= 1.102 )
+		if( ver < 1.102 )
 		{
-			return;
+			SetFailState("\n==========\nThis plugin requires \"Left 4 DHooks Direct\" version 1.102 or newer. Please update:\nhttps://forums.alliedmods.net/showthread.php?t=321696\n==========");
 		}
 	}
-
-	SetFailState("\n==========\nThis plugin requires \"Left 4 DHooks Direct\" version 1.02 or newer. Please update:\nhttps://forums.alliedmods.net/showthread.php?t=321696\n==========");
 }
 
 public void OnPluginStart()
@@ -472,7 +475,6 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 		}
 	}
 
-
 	// L4D2Direct_SetNextShoveTime(client, GetGameTime() + 0.5); // DEBUG
 
 	int type;
@@ -486,8 +488,6 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 		if( type > g_iClassMax ) return Plugin_Continue;
 		if( type == g_iClassTank ) type = 7;
 	}
-
-
 
 	// Deadstop shoving hunter
 	if( type == INDEX_HUNTER && !g_bCvarDeadstop && GetEntPropEnt(victim, Prop_Send, "m_hGroundEntity") == -1 && GetEntProp(victim, Prop_Send, "m_isAttemptingToPounce") )
@@ -522,14 +522,14 @@ public Action L4D_OnShovedBySurvivor(int client, int victim, const float vecDir[
 	if( g_iCvarTypes & (1 << type) )
 	{
 		damage = g_fCvarDamage[type];
-
 		if( damage )
 		{
 			// Damage scale
-			if( g_iCvarDamage[type - 1] == 2 )
+			if( g_iCvarDamage[type] == 2 )
 			{
 				int health = GetEntProp(victim, Prop_Data, "m_iMaxHealth");
-				damage *= health / 100;
+				damage = health * damage / 100;
+				RoundToCeil(damage);
 			}
 
 			SDKHooks_TakeDamage(victim, client, client, damage, DMG_GENERIC); // DMG_CLUB makes their health 1
@@ -681,7 +681,8 @@ public Action L4D2_OnEntityShoved(int client, int entity, int weapon, float vecD
 					if( g_iCvarDamage[INDEX_COMMON] == 2 )
 					{
 						int health = GetEntProp(entity, Prop_Data, "m_iMaxHealth");
-						damage *= health;
+						damage = health * damage / 100;
+						RoundToCeil(damage);
 					}
 
 					// If manually pushing, can't damage before or they won't stumble.. damage is handled by push hurt
